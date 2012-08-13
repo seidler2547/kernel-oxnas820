@@ -1750,11 +1750,17 @@ extern int ext4_get_blocks(handle_t *handle, struct inode *inode,
 			   struct buffer_head *bh, int flags);
 extern int ext4_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 			__u64 start, __u64 len);
+extern int ext4_get_extents(struct inode *inode, loff_t size);
+extern int ext4_getbmapx(struct inode *inode, struct getbmapx *bmx);
+
+extern int ext4_preallocate(struct file *filp, loff_t offset, loff_t len);
+extern int ext4_unpreallocate(struct file *filp, loff_t offset, loff_t len);
+extern int ext4_resetpreallocate(struct file *filp, loff_t offset, loff_t len);
+
 /* move_extent.c */
 extern int ext4_move_extents(struct file *o_filp, struct file *d_filp,
 			     __u64 start_orig, __u64 start_donor,
 			     __u64 len, __u64 *moved_len);
-
 
 /*
  * Add new method to test wether block and inode bitmaps are properly

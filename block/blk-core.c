@@ -601,6 +601,46 @@ blk_init_queue_node(request_fn_proc *rfn, spinlock_t *lock, int node_id)
 }
 EXPORT_SYMBOL(blk_init_queue_node);
 
+/**
+ * This is just the function above (blk_init_queue_node) with the allocation
+ * code and checks (from blk_alloc_queue_node) removed. It is used when a 
+ * queue that has been setup using blk_alloc_queue() needs to be used with a
+ * normal request_queue */
+int
+blk_reinit_queue(struct request_queue * q, request_fn_proc *rfn, spinlock_t *lock)
+{
+	q->node = -1;
+	if (blk_init_free_list(q)) {
+		kmem_cache_free(blk_requestq_cachep, q);
+		return -1;
+	}
+
+	q->request_fn		= rfn;
+	q->prep_rq_fn		= NULL;
+	q->unplug_fn		= generic_unplug_device;
+	q->queue_flags		= QUEUE_FLAG_DEFAULT;
+	q->queue_lock		= lock;
+
+	/*
+	 * This also sets hw/phys segments, boundary and size
+	 */
+	blk_queue_make_request(q, __make_request);
+
+	q->sg_reserved_size = INT_MAX;
+
+	/*
+	 * all done
+	 */
+	if (elevator_init(q, NULL)) {
+	    return -1;
+	}
+
+    blk_queue_congestion_threshold(q);
+    return 0;
+}
+EXPORT_SYMBOL(blk_reinit_queue);
+
+
 int blk_get_queue(struct request_queue *q)
 {
 	if (likely(!test_bit(QUEUE_FLAG_DEAD, &q->queue_flags))) {
@@ -1111,17 +1151,13 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 	req->cmd_type = REQ_TYPE_FS;
 
 	/*
-	 * inherit FAILFAST from bio (for read-ahead, and explicit FAILFAST)
+	 * Inherit FAILFAST from bio (for read-ahead, and explicit
+	 * FAILFAST).  FAILFAST flags are identical for req and bio.
 	 */
 	if (bio_rw_ahead(bio))
-		req->cmd_flags |= (REQ_FAILFAST_DEV | REQ_FAILFAST_TRANSPORT |
-				   REQ_FAILFAST_DRIVER);
-	if (bio_failfast_dev(bio))
-		req->cmd_flags |= REQ_FAILFAST_DEV;
-	if (bio_failfast_transport(bio))
-		req->cmd_flags |= REQ_FAILFAST_TRANSPORT;
-	if (bio_failfast_driver(bio))
-		req->cmd_flags |= REQ_FAILFAST_DRIVER;
+		req->cmd_flags |= REQ_FAILFAST_MASK;
+	else
+		req->cmd_flags |= bio->bi_rw & REQ_FAILFAST_MASK;
 
 	if (unlikely(bio_discard(bio))) {
 		req->cmd_flags |= REQ_DISCARD;
@@ -2239,9 +2275,8 @@ EXPORT_SYMBOL(__blk_end_request_cur);
 void blk_rq_bio_prep(struct request_queue *q, struct request *rq,
 		     struct bio *bio)
 {
-	/* Bit 0 (R/W) is identical in rq->cmd_flags and bio->bi_rw, and
-	   we want BIO_RW_AHEAD (bit 1) to imply REQ_FAILFAST (bit 1). */
-	rq->cmd_flags |= (bio->bi_rw & 3);
+	/* Bit 0 (R/W) is identical in rq->cmd_flags and bio->bi_rw */
+	rq->cmd_flags |= bio->bi_rw & REQ_RW;
 
 	if (bio_has_data(bio)) {
 		rq->nr_phys_segments = bio_phys_segments(q, bio);

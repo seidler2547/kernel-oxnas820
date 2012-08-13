@@ -1,0 +1,14 @@
+config MAPOWER_BTN_DRV
+	tristate "Custom Mapower button drivers for IX1"
+	help
+	  Say Y here to build custom Mapower button drivers for the IX1
+
+config MAPOWER_LED_DRV
+	tristate "Custom Mapower LED drivers for IX1"
+	help
+	  Say Y here to build custom Mapower LED drivers for the IX1
+
+config MAPOWER_THERM_DRV
+	tristate "Custom Mapower thermal drivers for IX1"
+	help
+	  Say Y here to build custom Mapower thermal drivers for the IX1

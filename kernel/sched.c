@@ -242,6 +242,7 @@ static void start_rt_bandwidth(struct rt_bandwidth *rt_b)
 		__hrtimer_start_range_ns(&rt_b->rt_period_timer, soft, delta,
 				HRTIMER_MODE_ABS_PINNED, 0);
 	}
+	WARN_ON(!spin_is_locked(&rt_b->rt_runtime_lock));
 	spin_unlock(&rt_b->rt_runtime_lock);
 }
 
@@ -922,6 +923,7 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 	 */
 	spin_acquire(&rq->lock.dep_map, 0, 0, _THIS_IP_);
 
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock_irq(&rq->lock);
 }
 
@@ -946,8 +948,10 @@ static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
 	next->oncpu = 1;
 #endif
 #ifdef __ARCH_WANT_INTERRUPTS_ON_CTXSW
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock_irq(&rq->lock);
 #else
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock(&rq->lock);
 #endif
 }
@@ -981,6 +985,7 @@ static inline struct rq *__task_rq_lock(struct task_struct *p)
 		spin_lock(&rq->lock);
 		if (likely(rq == task_rq(p)))
 			return rq;
+		WARN_ON(!spin_is_locked(&rq->lock));
 		spin_unlock(&rq->lock);
 	}
 }
@@ -1001,6 +1006,7 @@ static struct rq *task_rq_lock(struct task_struct *p, unsigned long *flags)
 		spin_lock(&rq->lock);
 		if (likely(rq == task_rq(p)))
 			return rq;
+		WARN_ON(!spin_is_locked(&rq->lock));
 		spin_unlock_irqrestore(&rq->lock, *flags);
 	}
 }
@@ -1016,12 +1022,14 @@ void task_rq_unlock_wait(struct task_struct *p)
 static void __task_rq_unlock(struct rq *rq)
 	__releases(rq->lock)
 {
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock(&rq->lock);
 }
 
 static inline void task_rq_unlock(struct rq *rq, unsigned long *flags)
 	__releases(rq->lock)
 {
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock_irqrestore(&rq->lock, *flags);
 }
 
@@ -1085,6 +1093,7 @@ static enum hrtimer_restart hrtick(struct hrtimer *timer)
 	spin_lock(&rq->lock);
 	update_rq_clock(rq);
 	rq->curr->sched_class->task_tick(rq, rq->curr, 1);
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock(&rq->lock);
 
 	return HRTIMER_NORESTART;
@@ -1101,6 +1110,7 @@ static void __hrtick_start(void *arg)
 	spin_lock(&rq->lock);
 	hrtimer_restart(&rq->hrtick_timer);
 	rq->hrtick_csd_pending = 0;
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock(&rq->lock);
 }
 
@@ -1208,7 +1218,8 @@ static void resched_task(struct task_struct *p)
 {
 	int cpu;
 
-	assert_spin_locked(&task_rq(p)->lock);
+	//assert_spin_locked(&task_rq(p)->lock);
+	WARN_ON(!spin_is_locked(&task_rq(p)->lock));
 
 	if (test_tsk_need_resched(p))
 		return;
@@ -1233,6 +1244,7 @@ static void resched_cpu(int cpu)
 	if (!spin_trylock_irqsave(&rq->lock, flags))
 		return;
 	resched_task(cpu_curr(cpu));
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock_irqrestore(&rq->lock, flags);
 }
 
@@ -1548,6 +1560,7 @@ update_group_shares_cpu(struct task_group *tg, int cpu,
 		tg->cfs_rq[cpu]->shares = shares;
 
 		__set_se_shares(tg->se[cpu], shares);
+		WARN_ON(!spin_is_locked(&rq->lock));
 		spin_unlock_irqrestore(&rq->lock, flags);
 	}
 }
@@ -1627,6 +1640,7 @@ static void update_shares(struct sched_domain *sd)
 
 static void update_shares_locked(struct rq *rq, struct sched_domain *sd)
 {
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock(&rq->lock);
 	update_shares(sd);
 	spin_lock(&rq->lock);
@@ -2677,7 +2691,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 
 	p->prio = effective_prio(p);
 
-	if (!p->sched_class->task_new || !current->se.on_rq) {
+	if (!p->sched_class->task_new || !current->se.on_rq || !rq->cfs.curr) {
 		activate_task(rq, p, 0);
 	} else {
 		/*
@@ -4304,6 +4318,7 @@ redo:
 		/*
 		 * Should not call ttwu while holding a rq->lock
 		 */
+		WARN_ON(!spin_is_locked(&this_rq->lock));
 		spin_unlock(&this_rq->lock);
 		if (active_balance)
 			wake_up_process(busiest->migration_thread);
@@ -5143,6 +5158,7 @@ void scheduler_tick(void)
 	update_rq_clock(rq);
 	update_cpu_load(rq);
 	curr->sched_class->task_tick(rq, curr, 0);
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock(&rq->lock);
 
 	perf_counter_task_tick(curr, cpu);
@@ -5375,8 +5391,10 @@ need_resched_nonpreemptible:
 		 */
 		cpu = smp_processor_id();
 		rq = cpu_rq(cpu);
-	} else
+	} else {
+		WARN_ON(!spin_is_locked(&rq->lock));
 		spin_unlock_irq(&rq->lock);
+	}
 
 	if (unlikely(reacquire_kernel_lock(current) < 0))
 		goto need_resched_nonpreemptible;
@@ -5556,6 +5574,7 @@ void __wake_up(wait_queue_head_t *q, unsigned int mode,
 
 	spin_lock_irqsave(&q->lock, flags);
 	__wake_up_common(q, mode, nr_exclusive, 0, key);
+	WARN_ON(!spin_is_locked(&q->lock));
 	spin_unlock_irqrestore(&q->lock, flags);
 }
 EXPORT_SYMBOL(__wake_up);
@@ -5604,6 +5623,7 @@ void __wake_up_sync_key(wait_queue_head_t *q, unsigned int mode,
 
 	spin_lock_irqsave(&q->lock, flags);
 	__wake_up_common(q, mode, nr_exclusive, sync, key);
+	WARN_ON(!spin_is_locked(&q->lock));
 	spin_unlock_irqrestore(&q->lock, flags);
 }
 EXPORT_SYMBOL_GPL(__wake_up_sync_key);
@@ -5835,10 +5855,12 @@ sleep_on_common(wait_queue_head_t *q, int state, long timeout)
 
 	spin_lock_irqsave(&q->lock, flags);
 	__add_wait_queue(q, &wait);
+	WARN_ON(!spin_is_locked(&q->lock));
 	spin_unlock(&q->lock);
 	timeout = schedule_timeout(timeout);
 	spin_lock_irq(&q->lock);
 	__remove_wait_queue(q, &wait);
+	WARN_ON(!spin_is_locked(&q->lock));
 	spin_unlock_irqrestore(&q->lock, flags);
 
 	return timeout;
@@ -5960,8 +5982,9 @@ void set_user_nice(struct task_struct *p, long nice)
 		 * If the task increased its priority or is running and
 		 * lowered its priority, then reschedule its CPU:
 		 */
-		if (delta < 0 || (delta > 0 && task_running(rq, p)))
+		if (delta < 0 || (delta > 0 && task_running(rq, p))) {
 			resched_task(rq->curr);
+		}
 	}
 out_unlock:
 	task_rq_unlock(rq, &flags);
@@ -6231,6 +6254,7 @@ recheck:
 		check_class_changed(rq, p, prev_class, oldprio, running);
 	}
 	__task_rq_unlock(rq);
+	WARN_ON(!spin_is_locked(&p->pi_lock));
 	spin_unlock_irqrestore(&p->pi_lock, flags);
 
 	rt_mutex_adjust_pi(p);
@@ -6883,6 +6907,7 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 #if defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW)
 	idle->oncpu = 1;
 #endif
+	WARN_ON(!spin_is_locked(&rq->lock));
 	spin_unlock_irqrestore(&rq->lock, flags);
 
 	/* Set the preempt count _outside_ the spinlocks! */

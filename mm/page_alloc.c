@@ -257,9 +257,17 @@ static void bad_page(struct page *page)
 	printk(KERN_ALERT "BUG: Bad page state in process %s  pfn:%05lx\n",
 		current->comm, page_to_pfn(page));
 	printk(KERN_ALERT
-		"page:%p flags:%p count:%d mapcount:%d mapping:%p index:%lx\n",
+		"page:%p flags:%p count:%d mapcount:%d mapping:%p index:%lx"
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		", incoherent %d"
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+		"\n",
 		page, (void *)page->flags, page_count(page),
-		page_mapcount(page), page->mapping, page->index);
+		page_mapcount(page), page->mapping, page->index
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		,PageIncoherentSendfile(page)
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
+		);
 
 	dump_stack();
 out:
@@ -498,6 +506,9 @@ static void free_page_mlock(struct page *page) { }
 static inline int free_pages_check(struct page *page)
 {
 	if (unlikely(page_mapcount(page) |
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		PageIncoherentSendfile(page) |
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		(page->mapping != NULL)  |
 		(atomic_read(&page->_count) != 0) |
 		(page->flags & PAGE_FLAGS_CHECK_AT_FREE))) {
@@ -537,6 +548,7 @@ static void free_pages_bulk(struct zone *zone, int count,
 		list_del(&page->lru);
 		__free_one_page(page, zone, order, page_private(page));
 	}
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock(&zone->lock);
 }
 
@@ -549,6 +561,7 @@ static void free_one_page(struct zone *zone, struct page *page, int order,
 
 	__mod_zone_page_state(zone, NR_FREE_PAGES, 1 << order);
 	__free_one_page(page, zone, order, migratetype);
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock(&zone->lock);
 }
 
@@ -648,7 +661,11 @@ static inline void expand(struct zone *zone, struct page *page,
  */
 static int prep_new_page(struct page *page, int order, gfp_t gfp_flags)
 {
+	WARN_ON(!page);
 	if (unlikely(page_mapcount(page) |
+#ifdef CONFIG_OXNAS_FAST_READS_AND_WRITES
+		PageIncoherentSendfile(page) |
+#endif // CONFIG_OXNAS_FAST_READS_AND_WRITES
 		(page->mapping != NULL)  |
 		(atomic_read(&page->_count) != 0)  |
 		(page->flags & PAGE_FLAGS_CHECK_AT_PREP))) {
@@ -911,6 +928,7 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 		list = &page->lru;
 	}
 	__mod_zone_page_state(zone, NR_FREE_PAGES, -(i << order));
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock(&zone->lock);
 	return i;
 }
@@ -1014,6 +1032,7 @@ void mark_free_pages(struct zone *zone)
 				swsusp_set_page_free(pfn_to_page(pfn + i));
 		}
 	}
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock_irqrestore(&zone->lock, flags);
 }
 #endif /* CONFIG_PM */
@@ -1167,6 +1186,7 @@ again:
 		}
 		spin_lock_irqsave(&zone->lock, flags);
 		page = __rmqueue(zone, order, migratetype);
+		WARN_ON(!spin_is_locked(&zone->lock));
 		spin_unlock(&zone->lock);
 		if (!page)
 			goto failed;
@@ -1954,10 +1974,11 @@ void __pagevec_free(struct pagevec *pvec)
 void __free_pages(struct page *page, unsigned int order)
 {
 	if (put_page_testzero(page)) {
-		if (order == 0)
+		if (order == 0) {
 			free_hot_page(page);
-		else
+		} else {
 			__free_pages_ok(page, order);
+		}
 	}
 }
 
@@ -2197,6 +2218,7 @@ void show_free_areas(void)
 			nr[order] = zone->free_area[order].nr_free;
 			total += nr[order] << order;
 		}
+		WARN_ON(!spin_is_locked(&zone->lock));
 		spin_unlock_irqrestore(&zone->lock, flags);
 		for (order = 0; order < MAX_ORDER; order++)
 			printk("%lu*%lukB ", nr[order], K(1UL) << order);
@@ -4512,6 +4534,7 @@ void setup_per_zone_wmarks(void)
 		zone->watermark[WMARK_LOW]  = min_wmark_pages(zone) + (tmp >> 2);
 		zone->watermark[WMARK_HIGH] = min_wmark_pages(zone) + (tmp >> 1);
 		setup_zone_migrate_reserve(zone);
+		WARN_ON(!spin_is_locked(&zone->lock));
 		spin_unlock_irqrestore(&zone->lock, flags);
 	}
 
@@ -4896,6 +4919,7 @@ int set_migratetype_isolate(struct page *page)
 	move_freepages_block(zone, page, MIGRATE_ISOLATE);
 	ret = 0;
 out:
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock_irqrestore(&zone->lock, flags);
 	if (!ret)
 		drain_all_pages();
@@ -4913,6 +4937,7 @@ void unset_migratetype_isolate(struct page *page)
 	set_pageblock_migratetype(page, MIGRATE_MOVABLE);
 	move_freepages_block(zone, page, MIGRATE_MOVABLE);
 out:
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock_irqrestore(&zone->lock, flags);
 }
 
@@ -4959,6 +4984,7 @@ __offline_isolated_pages(unsigned long start_pfn, unsigned long end_pfn)
 			SetPageReserved((page+i));
 		pfn += (1 << order);
 	}
+	WARN_ON(!spin_is_locked(&zone->lock));
 	spin_unlock_irqrestore(&zone->lock, flags);
 }
 #endif

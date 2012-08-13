@@ -109,6 +109,14 @@ asmlinkage void __exception asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
 
 	irq_enter();
 
+	// Issue a clrex to invalidate any locks in case the interrupt performs
+	// any cache ops
+	__asm__ __volatile__(
+		"clrex\n"
+		:
+		:
+		:"cc");
+
 	/*
 	 * Some hardware gives randomly wrong interrupts.  Rather
 	 * than crashing, do something sensible.
@@ -123,6 +131,14 @@ asmlinkage void __exception asm_do_IRQ(unsigned int irq, struct pt_regs *regs)
 
 	/* AT91 specific workaround */
 	irq_finish(irq);
+
+	// Issue a clrex to invalidate any locks that may have been pending
+	// when the irq went off. 
+	__asm__ __volatile__(
+		"clrex\n"
+		:
+		:
+		:"cc");
 
 	irq_exit();
 	set_irq_regs(old_regs);
