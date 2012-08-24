@@ -6,6 +6,7 @@
 //*****************************************************************************
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/input.h>
 #include <linux/module.h>
 #include <linux/kobject.h>
 #include <linux/workqueue.h>
@@ -77,6 +78,8 @@ static unsigned long otb_released_time = 0;
 static unsigned long power_pressed_time = 0;
 static unsigned long power_released_time = 0;
 
+static struct input_dev *button_input_dev;
+
 static DECLARE_WAIT_QUEUE_HEAD(wq);
 
 //*****************************************************************************
@@ -111,6 +114,7 @@ static irqreturn_t reset_btn_int_handler(int irq, void* dev_id)
 			reset_released_time = jiffies;
 			spin_unlock(&mp_button_spinlock);
 			schedule_work(&button_hotplug_work);
+			input_report_key(button_input_dev, KEY_SETUP, 0);
 		} 
 		else 
 		{
@@ -118,7 +122,9 @@ static irqreturn_t reset_btn_int_handler(int irq, void* dev_id)
 			spin_lock(&mp_button_spinlock);
 			reset_pressed_time = jiffies;
 			spin_unlock(&mp_button_spinlock);
+			input_report_key(button_input_dev, KEY_SETUP, 1);
 		}
+		input_sync(button_input_dev);
 		spin_unlock(&oxnas_gpio_spinlock);
 		
 		if (!readl((volatile unsigned long *)INT_STATUS_REG_A)) 
@@ -151,6 +157,7 @@ static irqreturn_t otb_btn_int_handler(int irq, void* dev_id)
 			otb_released_time = jiffies;
 			spin_unlock(&mp_button_spinlock);
 			schedule_work(&button_hotplug_work);
+			input_report_key(button_input_dev, KEY_XFER, 0);
 		} 
 		else 
 		{
@@ -158,7 +165,9 @@ static irqreturn_t otb_btn_int_handler(int irq, void* dev_id)
 			spin_lock(&mp_button_spinlock);
 			otb_pressed_time = jiffies;
 			spin_unlock(&mp_button_spinlock);
+			input_report_key(button_input_dev, KEY_XFER, 1);
 		}
+		input_sync(button_input_dev);
 		spin_unlock(&oxnas_gpio_spinlock);
 		
 		if (!readl((volatile unsigned long *)INT_STATUS_REG_A)) 
@@ -191,6 +200,7 @@ static irqreturn_t power_btn_int_handler(int irq, void* dev_id)
 			power_released_time = jiffies;
 			spin_unlock(&mp_button_spinlock);
 			schedule_work(&button_hotplug_work);
+			input_report_key(button_input_dev, KEY_POWER, 0);
 		} 
 		else 
 		{
@@ -198,7 +208,9 @@ static irqreturn_t power_btn_int_handler(int irq, void* dev_id)
 			spin_lock(&mp_button_spinlock);
 			power_pressed_time = jiffies;
 			spin_unlock(&mp_button_spinlock);
+			input_report_key(button_input_dev, KEY_POWER, 1);
 		}
+		input_sync(button_input_dev);
 		spin_unlock(&oxnas_gpio_spinlock);
 		
 		if (!readl((volatile unsigned long *)INT_STATUS_REG_B)) 
@@ -439,6 +451,25 @@ int init_mp_button_module(void)
 	if((ret = init_chrdev()) != 0)
 		return ret;
 	
+	button_input_dev = input_allocate_device();
+	if (!button_input_dev) {
+		printk(KERN_ERR "mp_button.c: Not enough memory\n");
+		return -ENOMEM;
+	}
+	
+	button_input_dev->name = "Mapower Buttons";
+	set_bit(EV_KEY,    button_input_dev->evbit);
+	set_bit(KEY_POWER, button_input_dev->keybit);
+	set_bit(KEY_SETUP, button_input_dev->keybit);
+	set_bit(KEY_XFER,  button_input_dev->keybit);
+	
+	ret = input_register_device(button_input_dev);
+	if (ret) {
+		printk(KERN_ERR "mp_button.c: Failed to register device\n");
+		input_free_device(button_input_dev);
+		return ret;
+	}
+	
 	return 0;
 }
 
@@ -446,6 +477,8 @@ int init_mp_button_module(void)
 void cleanup_mp_button_module(void)
 {
 	unsigned long flags;
+
+	input_unregister_device(button_input_dev);
 
 	unregister_chrdev(mp_button_major, "buttons");
 	
