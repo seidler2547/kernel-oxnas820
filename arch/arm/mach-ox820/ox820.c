@@ -574,6 +574,7 @@ printk(KERN_INFO "Powering down USB\n");
 
 static void arch_poweroff(void)
 {
+    int gpio_power_off_mask = 1 << 16;
 #if defined(CONFIG_LEON_POWER_BUTTON_MONITOR) || defined(CONFIG_LEON_POWER_BUTTON_MONITOR_MODULE)
     volatile unsigned char *sram_base = (volatile unsigned char *)SRAM_BASE;
     int i;
@@ -599,6 +600,10 @@ static void arch_poweroff(void)
     // Load CoPro program and start it running
     init_copro(leon_srec, oxnas_global_invert_leds);
 #endif // CONFIG_LEON_POWER_BUTTON_MONITOR
+
+    // now power down completely
+    writel(gpio_power_off_mask, GPIO_B_OUTPUT_CLEAR);
+    writel(gpio_power_off_mask, GPIO_B_OUTPUT_ENABLE_SET);
 }
 
 static void __init oxnas_init_machine(void)
